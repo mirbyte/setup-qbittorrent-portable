@@ -1,0 +1,1 @@
+# qbt-portable-updater
