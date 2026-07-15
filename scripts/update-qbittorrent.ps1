@@ -22,8 +22,7 @@ $AppDir = Join-Path $RootDir "app"
 $ProfileDir = Join-Path $AppDir "profile"
 $TempDir = Join-Path $RootDir "portable-temp"
 $ShortcutPath = Join-Path $RootDir "qBittorrent Portable.lnk"
-$BackupDir = Join-Path $RootDir ("app-backup-" + (Get-Date -Format "yyyy-MM-dd-HHmmss"))
-$InstallerAssetPattern = '^qbittorrent_\d+\.\d+\.\d+_x64_setup\.exe$'
+$InstallerVariantMarkerName = ".installer-variant"
 $UpdaterMutexName = "Global\setup-qbittorrent-portable-updater"
 $DownloadMaxAttempts = 3
 $DownloadTimeoutSec = 300
@@ -58,6 +57,12 @@ function Wait-ForExit {
 function Test-ProcessRunning {
     param([string]$ProcessName)
     return [bool](Get-Process -Name $ProcessName -ErrorAction SilentlyContinue)
+}
+
+function Assert-QBittorrentNotRunning {
+    if (Test-ProcessRunning "qbittorrent") {
+        throw "qbittorrent.exe is currently running. Close it before updating."
+    }
 }
 
 function Invoke-WithRetry {
@@ -207,9 +212,18 @@ function Remove-TempState {
 
 function Enter-UpdaterLock {
     $script:UpdaterMutex = New-Object System.Threading.Mutex($false, $UpdaterMutexName)
-    $script:UpdaterMutexAcquired = $script:UpdaterMutex.WaitOne(0, $false)
+
+    try {
+        $script:UpdaterMutexAcquired = $script:UpdaterMutex.WaitOne(0, $false)
+    }
+    catch [System.Threading.AbandonedMutexException] {
+        $script:UpdaterMutexAcquired = $true
+        Write-Log "Recovered updater lock from a previous crashed instance." "WARN"
+    }
 
     if (-not $script:UpdaterMutexAcquired) {
+        $script:UpdaterMutex.Dispose()
+        $script:UpdaterMutex = $null
         throw "Another updater instance is already running."
     }
 }
@@ -270,6 +284,69 @@ function Test-ValidInstall {
     return Test-Path (Join-Path $Directory "qbittorrent.exe")
 }
 
+function Test-AppPlaceholder {
+    if (-not (Test-Path $AppDir)) { return $false }
+    if (Test-ValidInstall -Directory $AppDir) { return $false }
+
+    $Items = @(Get-ChildItem -Path $AppDir -Force -ErrorAction SilentlyContinue)
+    if ($Items.Count -eq 0) { return $true }
+    if ($Items.Count -eq 1 -and $Items[0].Name -eq '.gitkeep') { return $true }
+
+    return $false
+}
+
+function Test-ProfileHasData {
+    param([string]$Directory)
+
+    if (-not (Test-Path $Directory)) { return $false }
+
+    return [bool](Get-ChildItem -Path $Directory -Force -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
+}
+
+function Get-UniqueDirectoryName {
+    param([string]$Prefix)
+
+    for ($Attempt = 0; $Attempt -lt 100; $Attempt++) {
+        $Suffix = (Get-Date -Format "yyyy-MM-dd-HHmmss-fff")
+        if ($Attempt -gt 0) {
+            $Suffix = "$Suffix-$Attempt"
+        }
+
+        $Name = "$Prefix$Suffix"
+        if (-not (Test-Path (Join-Path $RootDir $Name))) {
+            return $Name
+        }
+    }
+
+    throw "Could not allocate a unique directory name for prefix '$Prefix'."
+}
+
+function New-BackupDirectoryPath {
+    return Join-Path $RootDir (Get-UniqueDirectoryName -Prefix "app-backup-")
+}
+
+function Restore-ProfileFromBackup {
+    param(
+        [array]$ValidBackups,
+        [string]$DestinationProfileDir
+    )
+
+    if (Test-ProfileHasData -Directory $DestinationProfileDir) { return }
+
+    foreach ($Backup in $ValidBackups) {
+        $BackupProfileDir = Join-Path $Backup.FullName "profile"
+        if (-not (Test-ProfileHasData -Directory $BackupProfileDir)) { continue }
+
+        Write-Log "Profile missing or empty. Restoring from $($Backup.Name)..." "WARN"
+        if (Test-Path $DestinationProfileDir) {
+            Remove-Item -Path $DestinationProfileDir -Recurse -Force
+        }
+
+        Copy-Item -Path $BackupProfileDir -Destination $DestinationProfileDir -Recurse -Force
+        return
+    }
+}
+
 function Get-ValidBackupDirectories {
     Get-ChildItem -Path $RootDir -Filter "app-backup-*" -Directory -ErrorAction SilentlyContinue |
         Where-Object { Test-ValidInstall -Directory $_.FullName } |
@@ -292,21 +369,41 @@ function Remove-StaleUpdaterArtifacts {
 function Repair-IncompleteState {
     Remove-StaleUpdaterArtifacts
 
+    $ValidBackups = @(Get-ValidBackupDirectories)
+
     if (-not (Test-Path $AppDir)) {
+        if ($ValidBackups.Count -gt 0) {
+            Write-Log "App directory missing. Restoring from $($ValidBackups[0].Name)..." "WARN"
+            Rename-Item -Path $ValidBackups[0].FullName -NewName "app"
+        }
+
         return
     }
 
     if (Test-ValidInstall -Directory $AppDir) {
+        Restore-ProfileFromBackup -ValidBackups $ValidBackups -DestinationProfileDir $ProfileDir
         return
     }
 
-    $ValidBackups = @(Get-ValidBackupDirectories)
+    if (Test-AppPlaceholder) {
+        if ($ValidBackups.Count -gt 0) {
+            Write-Log "Placeholder app directory found. Restoring from $($ValidBackups[0].Name)..." "WARN"
+            Remove-Item -Path $AppDir -Recurse -Force
+            Rename-Item -Path $ValidBackups[0].FullName -NewName "app"
+        } else {
+            Write-Log "Removing placeholder app directory for first-time install."
+            Remove-Item -Path $AppDir -Recurse -Force
+        }
+
+        return
+    }
+
     if ($ValidBackups.Count -eq 0) {
         throw "Incomplete installation detected and no valid backup found. Remove or repair the app folder manually."
     }
 
     $RestoreBackup = $ValidBackups[0]
-    $BrokenDirName = "app-broken-" + (Get-Date -Format "yyyy-MM-dd-HHmmss")
+    $BrokenDirName = Get-UniqueDirectoryName -Prefix "app-broken-"
 
     Write-Log "Incomplete installation detected. Restoring from $($RestoreBackup.Name)..." "WARN"
     Rename-Item -Path $AppDir -NewName $BrokenDirName
@@ -329,20 +426,87 @@ function Invoke-Rollback {
         [bool]$HadExistingInstall
     )
 
-    if ($HadExistingInstall -and $BackupDirectory -and (Test-Path $BackupDirectory)) {
-        if (Test-Path $AppDir) {
-            Remove-Item -Path $AppDir -Recurse -Force -ErrorAction SilentlyContinue
+    try {
+        if ($HadExistingInstall -and $BackupDirectory -and (Test-Path $BackupDirectory)) {
+            $BrokenDirPath = $null
+
+            if (Test-Path $AppDir) {
+                $BrokenDirName = Get-UniqueDirectoryName -Prefix "app-broken-"
+                $BrokenDirPath = Join-Path $RootDir $BrokenDirName
+                Rename-Item -Path $AppDir -NewName $BrokenDirName -ErrorAction Stop
+            }
+
+            try {
+                Rename-Item -Path $BackupDirectory -NewName "app" -ErrorAction Stop
+            }
+            catch {
+                if ($BrokenDirPath -and (Test-Path $BrokenDirPath) -and -not (Test-Path $AppDir)) {
+                    Rename-Item -Path $BrokenDirPath -NewName "app" -ErrorAction SilentlyContinue
+                }
+
+                throw
+            }
+
+            Write-Log "Rollback complete."
+            return $true
         }
 
-        Rename-Item -Path $BackupDirectory -NewName "app"
-        Write-Log "Rollback complete."
-        return
+        if (Test-Path $AppDir) {
+            Remove-Item -Path $AppDir -Recurse -Force -ErrorAction Stop
+            Write-Log "Removed incomplete first-time installation."
+        }
+
+        return $true
+    }
+    catch {
+        Write-Log "Rollback failed: $_" "ERROR"
+        return $false
+    }
+}
+
+function Get-PreferredInstallerVariant {
+    $MarkerPath = Join-Path $AppDir $InstallerVariantMarkerName
+    if (-not (Test-Path $MarkerPath)) { return $null }
+
+    $Variant = (Get-Content -Path $MarkerPath -Raw).Trim().ToLowerInvariant()
+    if ($Variant -eq "lt20" -or $Variant -eq "standard") {
+        return $Variant
     }
 
-    if (Test-Path $AppDir) {
-        Remove-Item -Path $AppDir -Recurse -Force -ErrorAction SilentlyContinue
-        Write-Log "Removed incomplete first-time installation."
+    return $null
+}
+
+function Get-InstallerReleaseAsset {
+    param($ReleaseAssets)
+
+    $MatchingAssets = @(
+        $ReleaseAssets | Where-Object { $_.name -match '^qbittorrent_\d+\.\d+\.\d+(_lt20)?_x64_setup\.exe$' }
+    )
+
+    if ($MatchingAssets.Count -eq 0) { return $null }
+
+    $PreferredVariant = Get-PreferredInstallerVariant
+
+    if ($PreferredVariant -eq "lt20") {
+        $Selected = $MatchingAssets | Where-Object { $_.name -match '_lt20_' } | Select-Object -First 1
+        if ($Selected) { return $Selected }
     }
+    elseif ($PreferredVariant -eq "standard") {
+        $Selected = $MatchingAssets | Where-Object { $_.name -notmatch '_lt20_' } | Select-Object -First 1
+        if ($Selected) { return $Selected }
+    }
+
+    $Lt20Asset = $MatchingAssets | Where-Object { $_.name -match '_lt20_' } | Select-Object -First 1
+    if ($Lt20Asset) { return $Lt20Asset }
+
+    return $MatchingAssets | Where-Object { $_.name -notmatch '_lt20_' } | Select-Object -First 1
+}
+
+function Set-InstallerVariantMarker {
+    param([string]$InstallerName)
+
+    $Variant = if ($InstallerName -match '_lt20_') { "lt20" } else { "standard" }
+    Set-Content -Path (Join-Path $AppDir $InstallerVariantMarkerName) -Value $Variant -Encoding ASCII -NoNewline
 }
 
 function Remove-OldBackups {
@@ -368,6 +532,14 @@ function Remove-OldBackups {
         }
 }
 
+function Remove-OldBrokenInstalls {
+    Get-ChildItem -Path $RootDir -Filter "app-broken-*" -Directory -ErrorAction SilentlyContinue |
+        ForEach-Object {
+            Write-Log "Removing broken install snapshot $(Split-Path $_.FullName -Leaf)."
+            Remove-Item -Path $_.FullName -Recurse -Force -ErrorAction SilentlyContinue
+        }
+}
+
 # --- Main Logic ---
 Write-Log "Updater started"
 
@@ -381,8 +553,11 @@ catch {
 }
 
 try {
-    if (Test-ProcessRunning "qbittorrent") {
-        Write-Log "qbittorrent.exe is currently running. Close it before updating." "ERROR"
+    try {
+        Assert-QBittorrentNotRunning
+    }
+    catch {
+        Write-Log $_.Exception.Message "ERROR"
         Wait-ForExit
         exit 1
     }
@@ -413,10 +588,10 @@ try {
             Invoke-RestMethod -Uri "https://api.github.com/repos/qbittorrent/qBittorrent/releases/latest"
         }
         $Version = $Release.tag_name -replace '^(?:v|release-)', ''
-        $Asset = $Release.assets | Where-Object { $_.name -match $InstallerAssetPattern } | Select-Object -First 1
+        $Asset = Get-InstallerReleaseAsset -ReleaseAssets $Release.assets
 
         if (-not $Asset) {
-            throw "Could not find the standard x64 Windows installer in the latest release."
+            throw "Could not find an x64 Windows installer in the latest release."
         }
 
         if (-not $Asset.size -or -not $Asset.digest) {
@@ -467,13 +642,17 @@ try {
         exit 1
     }
 
-    if (Test-Path $TempDir) {
-        Remove-Item -Path $TempDir -Recurse -Force
-    }
-    New-Item -ItemType Directory -Path $TempDir | Out-Null
-
     Write-Log "Extracting installer using 7-Zip..."
     try {
+        if (Test-Path $TempDir) {
+            Remove-Item -Path $TempDir -Recurse -Force -ErrorAction SilentlyContinue
+            if (Test-Path $TempDir) {
+                throw "Could not remove stale extraction directory. Close any programs using portable-temp."
+            }
+        }
+
+        New-Item -ItemType Directory -Path $TempDir -Force | Out-Null
+
         $Arguments = @(
             "x",
             "`"$InstallerPath`"",
@@ -509,19 +688,26 @@ try {
     $HadExistingInstall = Test-Path $AppDir
     $DeploymentSucceeded = $false
     $ActiveBackupDir = $null
+    $PreserveInstaller = $false
 
     try {
+        Assert-QBittorrentNotRunning
+
         if ($HadExistingInstall) {
-            $ActiveBackupDir = $BackupDir
+            $ActiveBackupDir = New-BackupDirectoryPath
             Write-Log "Backing up current installation to $(Split-Path $ActiveBackupDir -Leaf)..."
             Rename-Item -Path $AppDir -NewName (Split-Path $ActiveBackupDir -Leaf)
         }
+
+        Assert-QBittorrentNotRunning
 
         New-Item -ItemType Directory -Path $AppDir -Force | Out-Null
 
         Write-Log "Deploying extracted files to app directory..."
         Get-ChildItem -Path $TempDir -Force | Move-Item -Destination $AppDir -Force
         Remove-NsisArtifacts -Directory $AppDir
+
+        Assert-QBittorrentNotRunning
 
         $BackupProfileDir = if ($ActiveBackupDir) { Join-Path $ActiveBackupDir "profile" } else { $null }
         if ($BackupProfileDir -and (Test-Path $BackupProfileDir)) {
@@ -532,22 +718,31 @@ try {
             New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
         }
 
+        Set-InstallerVariantMarker -InstallerName $InstallerName
+
         Write-Log "qBittorrent updated successfully to $Version." "SUCCESS"
         $DeploymentSucceeded = $true
     }
     catch {
         Write-Log "Failed to deploy files: $_" "ERROR"
         Write-Log "Attempting rollback..."
-        Invoke-Rollback -BackupDirectory $ActiveBackupDir -HadExistingInstall $HadExistingInstall
+        $RollbackSucceeded = Invoke-Rollback -BackupDirectory $ActiveBackupDir -HadExistingInstall $HadExistingInstall
+        if (-not $RollbackSucceeded) {
+            Write-Log "Automatic rollback could not complete. Manual recovery may be required." "ERROR"
+            $PreserveInstaller = $true
+        }
+
         Wait-ForExit
         exit 1
     }
     finally {
         Write-Log "Cleaning up temporary files..."
-        Remove-TempState -InstallerPath $InstallerPath -IncludeTempDir
+        $InstallerToRemove = if ($PreserveInstaller) { $null } else { $InstallerPath }
+        Remove-TempState -InstallerPath $InstallerToRemove -IncludeTempDir
 
         if ($DeploymentSucceeded) {
             Remove-OldBackups
+            Remove-OldBrokenInstalls
         } elseif ($ActiveBackupDir -and (Test-Path $ActiveBackupDir)) {
             Write-Log "Backup retained at $(Split-Path $ActiveBackupDir -Leaf) for recovery."
         }

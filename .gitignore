@@ -2,6 +2,7 @@
 /app/*
 !/app/.gitkeep
 /app-backup-*/
+/app-broken-*/
 
 # Temporary extraction and downloads
 /portable-temp/
