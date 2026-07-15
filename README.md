@@ -1,5 +1,10 @@
 # Unofficial qBittorrent portable setup
 
+[![License](https://img.shields.io/github/license/mirbyte/setup-qbittorrent-portable?color=356EBF)](https://raw.githubusercontent.com/mirbyte/setup-qbittorrent-portable/main/LICENSE)
+![Size](https://img.shields.io/github/repo-size/mirbyte/setup-qbittorrent-portable?label=size&color=356EBF)
+[![Download Count](https://img.shields.io/github/downloads/mirbyte/setup-qbittorrent-portable/total?color=356EBF)](https://github.com/mirbyte/setup-qbittorrent-portable/releases/latest)
+[![Latest Release](https://img.shields.io/github/release/mirbyte/setup-qbittorrent-portable.svg?color=356EBF)](https://github.com/mirbyte/setup-qbittorrent-portable/releases/latest)
+
 Install and update the official **qBittorrent** Windows x64 client in native portable mode.
 
 > Not affiliated with or endorsed by the qBittorrent project.
