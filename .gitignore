@@ -11,10 +11,6 @@
 /updater_events.log
 /qBittorrent Portable.lnk
 
-# 7-Zip
-/7zip/*
-!/7zip/License.txt
-!/7zip/History.txt
 
 # Other
 .cursorignore
