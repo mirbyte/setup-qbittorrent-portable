@@ -1,0 +1,20 @@
+# Installed application and user data
+/app/*
+!/app/.gitkeep
+/app-backup-*/
+
+# Temporary extraction and downloads
+/portable-temp/
+/qbittorrent_*_setup.exe
+
+# Generated at runtime
+/updater_events.log
+/qBittorrent Portable.lnk
+
+# 7-Zip
+/7zip/*
+!/7zip/License.txt
+!/7zip/History.txt
+
+# Other
+.cursorignore
