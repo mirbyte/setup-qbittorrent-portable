@@ -11,7 +11,7 @@ Install and update the official **qBittorrent** Windows x64 client in native por
 
 Close qBittorrent before re-running. Each run fetches the latest release from GitHub.
 
-**Requirements:** Windows 10/11 x64, PowerShell, internet, free disk space for the installer plus your existing `app\` folder during updates.
+**Requirements:** Windows 10/11 x64, PowerShell, internet.
 
 ## Layout
 
