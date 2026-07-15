@@ -1,6 +1,6 @@
-# setup-qbittorrent-portable
+# Unofficial qBittorrent portable setup
 
-Install and update the official **qBittorrent** Windows x64 client in native portable mode. Settings and data live in `app\profile\`.
+Install and update the official **qBittorrent** Windows x64 client in native portable mode.
 
 > Not affiliated with or endorsed by the qBittorrent project.
 
