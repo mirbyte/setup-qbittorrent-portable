@@ -13,8 +13,6 @@ Close qBittorrent before re-running. Each run fetches the latest release from Gi
 
 **Requirements:** Windows 10/11 x64, PowerShell, internet, ~200 MB free space.
 
-**Automation:** `Update qBittorrent Portable.bat -NonInteractive`
-
 ## Layout
 
 | Path | Purpose |
