@@ -303,6 +303,59 @@ function Test-ProfileHasData {
     return [bool](Get-ChildItem -Path $Directory -Force -Recurse -ErrorAction SilentlyContinue | Select-Object -First 1)
 }
 
+function Get-ProfileMetrics {
+    param([string]$Directory)
+
+    if (-not (Test-Path $Directory)) {
+        return @{
+            FileCount = 0
+            ByteSize = [long]0
+        }
+    }
+
+    $Files = @(Get-ChildItem -Path $Directory -Force -Recurse -File -ErrorAction SilentlyContinue)
+    $ByteSize = ($Files | Measure-Object -Property Length -Sum).Sum
+    if ($null -eq $ByteSize) { $ByteSize = 0 }
+
+    return @{
+        FileCount = $Files.Count
+        ByteSize = [long]$ByteSize
+    }
+}
+
+function Assert-DeploySucceeded {
+    param([hashtable]$ExpectedProfileMetrics = $null)
+
+    if (-not (Test-ValidInstall -Directory $AppDir)) {
+        throw "Deploy verification failed: qbittorrent.exe is missing."
+    }
+
+    if (-not (Test-Path $ProfileDir)) {
+        throw "Deploy verification failed: profile directory is missing."
+    }
+
+    $ProfileItem = Get-Item -LiteralPath $ProfileDir -Force
+    if (-not $ProfileItem.PSIsContainer) {
+        throw "Deploy verification failed: app\profile is not a directory."
+    }
+
+    if ($ExpectedProfileMetrics) {
+        $ActualMetrics = Get-ProfileMetrics -Directory $ProfileDir
+
+        if ($ActualMetrics.FileCount -ne $ExpectedProfileMetrics.FileCount) {
+            throw "Deploy verification failed: profile file count mismatch (expected $($ExpectedProfileMetrics.FileCount), got $($ActualMetrics.FileCount))."
+        }
+
+        if ($ActualMetrics.ByteSize -ne $ExpectedProfileMetrics.ByteSize) {
+            throw "Deploy verification failed: profile size mismatch (expected $($ExpectedProfileMetrics.ByteSize) bytes, got $($ActualMetrics.ByteSize) bytes)."
+        }
+
+        Write-Log "Profile verified ($($ActualMetrics.FileCount) files, $($ActualMetrics.ByteSize) bytes)."
+    }
+
+    Write-Log "Deploy verification passed."
+}
+
 function Get-UniqueDirectoryName {
     param([string]$Prefix)
 
@@ -345,6 +398,54 @@ function Restore-ProfileFromBackup {
         Copy-Item -Path $BackupProfileDir -Destination $DestinationProfileDir -Recurse -Force
         return
     }
+}
+
+function Move-ProfileFromBackup {
+    param(
+        [string]$SourceProfileDir,
+        [string]$DestinationProfileDir
+    )
+
+    if (-not (Test-Path $SourceProfileDir)) {
+        throw "Source profile directory not found."
+    }
+
+    $ParentDir = Split-Path $DestinationProfileDir -Parent
+    if (-not (Test-Path $ParentDir)) {
+        New-Item -ItemType Directory -Path $ParentDir -Force | Out-Null
+    }
+
+    if (Test-Path $DestinationProfileDir) {
+        if (Test-ProfileHasData -Directory $DestinationProfileDir) {
+            throw "Cannot restore profile: destination already contains data."
+        }
+
+        Remove-Item -Path $DestinationProfileDir -Recurse -Force
+    }
+
+    try {
+        Move-Item -LiteralPath $SourceProfileDir -Destination $ParentDir -Force
+        Write-Log "Profile moved into app directory."
+        return $true
+    }
+    catch {
+        Write-Log "Profile move failed ($($_.Exception.Message)). Falling back to staged copy..." "WARN"
+    }
+
+    $StagingDir = "$DestinationProfileDir.new"
+    if (Test-Path $StagingDir) {
+        Remove-Item -Path $StagingDir -Recurse -Force
+    }
+
+    Copy-Item -Path $SourceProfileDir -Destination $StagingDir -Recurse -Force
+
+    if (-not (Test-Path $StagingDir)) {
+        throw "Profile copy fallback failed."
+    }
+
+    Move-Item -LiteralPath $StagingDir -Destination $DestinationProfileDir -Force
+    Write-Log "Profile restored via staged copy."
+    return $false
 }
 
 function Get-ValidBackupDirectories {
@@ -423,11 +524,22 @@ function Test-ExtractedPayload {
 function Invoke-Rollback {
     param(
         [string]$BackupDirectory,
-        [bool]$HadExistingInstall
+        [bool]$HadExistingInstall,
+        [bool]$ProfileMovedFromBackup = $false
     )
 
     try {
         if ($HadExistingInstall -and $BackupDirectory -and (Test-Path $BackupDirectory)) {
+            $BackupProfileDir = Join-Path $BackupDirectory "profile"
+
+            if ($ProfileMovedFromBackup -and (Test-Path $AppDir)) {
+                $AppProfileDir = Join-Path $AppDir "profile"
+                if ((Test-Path $AppProfileDir) -and -not (Test-Path $BackupProfileDir)) {
+                    Write-Log "Returning profile to backup before rollback..."
+                    Move-Item -LiteralPath $AppProfileDir -Destination $BackupDirectory -Force
+                }
+            }
+
             $BrokenDirPath = $null
 
             if (Test-Path $AppDir) {
@@ -689,6 +801,7 @@ try {
     $DeploymentSucceeded = $false
     $ActiveBackupDir = $null
     $PreserveInstaller = $false
+    $ProfileMovedFromBackup = $false
 
     try {
         Assert-QBittorrentNotRunning
@@ -710,9 +823,13 @@ try {
         Assert-QBittorrentNotRunning
 
         $BackupProfileDir = if ($ActiveBackupDir) { Join-Path $ActiveBackupDir "profile" } else { $null }
+        $ExpectedProfileMetrics = $null
         if ($BackupProfileDir -and (Test-Path $BackupProfileDir)) {
-            Write-Log "Restoring profile from backup..."
-            Copy-Item -Path $BackupProfileDir -Destination $ProfileDir -Recurse -Force
+            $ExpectedProfileMetrics = Get-ProfileMetrics -Directory $BackupProfileDir
+            Write-Log "Restoring profile from backup ($($ExpectedProfileMetrics.FileCount) files, $($ExpectedProfileMetrics.ByteSize) bytes)..."
+            $ProfileMovedFromBackup = Move-ProfileFromBackup `
+                -SourceProfileDir $BackupProfileDir `
+                -DestinationProfileDir $ProfileDir
         } elseif (-not (Test-Path $ProfileDir)) {
             Write-Log "Creating profile directory for native portable mode..."
             New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
@@ -720,13 +837,18 @@ try {
 
         Set-InstallerVariantMarker -InstallerName $InstallerName
 
+        Assert-DeploySucceeded -ExpectedProfileMetrics $ExpectedProfileMetrics
+
         Write-Log "qBittorrent updated successfully to $Version." "SUCCESS"
         $DeploymentSucceeded = $true
     }
     catch {
         Write-Log "Failed to deploy files: $_" "ERROR"
         Write-Log "Attempting rollback..."
-        $RollbackSucceeded = Invoke-Rollback -BackupDirectory $ActiveBackupDir -HadExistingInstall $HadExistingInstall
+        $RollbackSucceeded = Invoke-Rollback `
+            -BackupDirectory $ActiveBackupDir `
+            -HadExistingInstall $HadExistingInstall `
+            -ProfileMovedFromBackup $ProfileMovedFromBackup
         if (-not $RollbackSucceeded) {
             Write-Log "Automatic rollback could not complete. Manual recovery may be required." "ERROR"
             $PreserveInstaller = $true
