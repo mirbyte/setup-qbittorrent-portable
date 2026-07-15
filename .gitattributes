@@ -1,0 +1,21 @@
+# Normalize text files to LF (matches .editorconfig)
+* text=auto eol=lf
+
+*.md            text
+*.ps1           text
+*.psm1          text
+*.psd1          text
+*.bat           text
+*.cmd           text
+*.txt           text
+.gitignore      text
+.gitattributes  text
+.editorconfig   text
+
+*.exe           binary
+*.dll           binary
+*.pdb           binary
+*.lnk           binary
+*.qm            binary
+*.bmp           binary
+*.7z            binary
