@@ -31,3 +31,13 @@ This repo includes an **unmodified** copy of [7-Zip](https://www.7-zip.org/) (cu
 
 ---
 
+<img width="1968" height="995" alt="download" src="https://github.com/user-attachments/assets/4e813550-3ebd-48d3-9a24-6e75302ce534" />
+
+
+<br>
+
+
+<img width="1456" height="731" alt="success" src="https://github.com/user-attachments/assets/14036b3d-c348-495d-911b-176acbf3905d" />
+
+
+
