@@ -7,11 +7,23 @@
     data in app\profile.
 .PARAMETER NonInteractive
     Skip the final "Press Enter" prompts. Useful for automation.
+.PARAMETER Version
+    Print the updater version and exit.
+.VERSION
+    1.0.0
 #>
 
 param(
-    [switch]$NonInteractive
+    [switch]$NonInteractive,
+    [switch]$Version
 )
+
+$ScriptVersion = '1.0.0'
+
+if ($Version) {
+    Write-Output $ScriptVersion
+    exit 0
+}
 
 $ErrorActionPreference = "Stop"
 $RootDir = Split-Path $PSScriptRoot -Parent
@@ -653,7 +665,7 @@ function Remove-OldBrokenInstalls {
 }
 
 # --- Main Logic ---
-Write-Log "Updater started"
+Write-Log "Updater v$ScriptVersion started"
 
 try {
     Enter-UpdaterLock
