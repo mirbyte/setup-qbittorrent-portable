@@ -7,23 +7,15 @@
     data in app\profile.
 .PARAMETER NonInteractive
     Skip the final "Press Enter" prompts. Useful for automation.
-.PARAMETER Version
-    Print the updater version and exit.
 .VERSION
     1.0.0
 #>
 
 param(
-    [switch]$NonInteractive,
-    [switch]$Version
+    [switch]$NonInteractive
 )
 
 $ScriptVersion = '1.0.0'
-
-if ($Version) {
-    Write-Output $ScriptVersion
-    exit 0
-}
 
 $ErrorActionPreference = "Stop"
 $RootDir = Split-Path $PSScriptRoot -Parent
