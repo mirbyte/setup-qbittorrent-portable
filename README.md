@@ -18,6 +18,15 @@ Close qBittorrent before re-running. Each run fetches the latest release from Gi
 
 **Requirements:** Windows 10/11 x64, PowerShell, internet.
 
+## File associations
+
+The updater does not register `.torrent` or `magnet` handlers. Set them manually if you want:
+
+1. **Windows:** Settings → Apps → Default apps → Choose defaults by file type → `.torrent` → `app\qbittorrent.exe`. For magnets: Default apps → Choose defaults by link type → `magnet`.
+2. **Firefox:** Settings → Downloads → under Files and applications, set **magnet** to `app\qbittorrent.exe`.
+
+Chrome and Edge might follow the Windows `magnet` default. Re-check the path if you move this folder.
+
 ## Layout
 
 | Path | Purpose |
