@@ -26,7 +26,6 @@ $AppDir = Join-Path $RootDir "app"
 $ProfileDir = Join-Path $AppDir "profile"
 $TempDir = Join-Path $RootDir "portable-temp"
 $ShortcutPath = Join-Path $RootDir "qBittorrent Portable.lnk"
-$InstallerVariantMarkerName = ".installer-variant"
 $UpdaterMutexName = "Global\setup-qbittorrent-portable-updater"
 $DownloadMaxAttempts = 3
 $DownloadTimeoutSec = 300
@@ -580,49 +579,10 @@ function Invoke-Rollback {
     }
 }
 
-function Get-PreferredInstallerVariant {
-    $MarkerPath = Join-Path $AppDir $InstallerVariantMarkerName
-    if (-not (Test-Path $MarkerPath)) { return $null }
-
-    $Variant = (Get-Content -Path $MarkerPath -Raw).Trim().ToLowerInvariant()
-    if ($Variant -eq "lt20" -or $Variant -eq "standard") {
-        return $Variant
-    }
-
-    return $null
-}
-
 function Get-InstallerReleaseAsset {
     param($ReleaseAssets)
 
-    $MatchingAssets = @(
-        $ReleaseAssets | Where-Object { $_.name -match '^qbittorrent_\d+\.\d+\.\d+(_lt20)?_x64_setup\.exe$' }
-    )
-
-    if ($MatchingAssets.Count -eq 0) { return $null }
-
-    $PreferredVariant = Get-PreferredInstallerVariant
-
-    if ($PreferredVariant -eq "lt20") {
-        $Selected = $MatchingAssets | Where-Object { $_.name -match '_lt20_' } | Select-Object -First 1
-        if ($Selected) { return $Selected }
-    }
-    elseif ($PreferredVariant -eq "standard") {
-        $Selected = $MatchingAssets | Where-Object { $_.name -notmatch '_lt20_' } | Select-Object -First 1
-        if ($Selected) { return $Selected }
-    }
-
-    $Lt20Asset = $MatchingAssets | Where-Object { $_.name -match '_lt20_' } | Select-Object -First 1
-    if ($Lt20Asset) { return $Lt20Asset }
-
-    return $MatchingAssets | Where-Object { $_.name -notmatch '_lt20_' } | Select-Object -First 1
-}
-
-function Set-InstallerVariantMarker {
-    param([string]$InstallerName)
-
-    $Variant = if ($InstallerName -match '_lt20_') { "lt20" } else { "standard" }
-    Set-Content -Path (Join-Path $AppDir $InstallerVariantMarkerName) -Value $Variant -Encoding ASCII -NoNewline
+    return $ReleaseAssets | Where-Object { $_.name -match '^qbittorrent_\d+\.\d+\.\d+_x64_setup\.exe$' } | Select-Object -First 1
 }
 
 function Remove-OldBackups {
@@ -838,8 +798,6 @@ try {
             Write-Log "Creating profile directory for native portable mode..."
             New-Item -ItemType Directory -Path $ProfileDir -Force | Out-Null
         }
-
-        Set-InstallerVariantMarker -InstallerName $InstallerName
 
         Assert-DeploySucceeded -ExpectedProfileMetrics $ExpectedProfileMetrics
 
