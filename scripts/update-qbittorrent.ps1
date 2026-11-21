@@ -567,7 +567,7 @@ function Invoke-Rollback {
             return $true
         }
 
-        if (Test-Path $AppDir) {
+        if (-not $HadExistingInstall -and (Test-Path $AppDir)) {
             Remove-Item -Path $AppDir -Recurse -Force -ErrorAction Stop
             Write-Log "Removed incomplete first-time installation."
         }
