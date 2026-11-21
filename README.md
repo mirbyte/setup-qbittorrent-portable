@@ -51,6 +51,16 @@ On update, the script:
 
 Downloaded torrent files are stored wherever you configured save paths in qBittorrent; only `app\profile\` is managed by this updater. Back up `app\profile\` separately if your data is critical.
 
+## Updating the kit
+
+The kit's scripts are not updated automatically. To update:
+
+1. Download the latest `vX.Y.Z.zip` from [Releases](https://github.com/mirbyte/setup-qbittorrent-portable/releases/latest).
+2. Extract it over the existing folder and choose **Replace the files in the destination**.
+3. Do not delete the old folder first. The zip contains no files under `app\`, so `app\profile\` is kept.
+
+Git users can run `git pull` instead. `app\` is ignored by git, so your profile is not affected.
+
 ## Bundled 7-Zip
 
 This repo includes an **unmodified** copy of [7-Zip](https://www.7-zip.org/) (currently 26.02) in `7zip\`. It is used only to extract the official qBittorrent installer. No changes were made to the 7-Zip binaries.
