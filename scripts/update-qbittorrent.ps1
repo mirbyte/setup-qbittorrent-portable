@@ -7,15 +7,13 @@
     data in app\profile.
 .PARAMETER NonInteractive
     Skip the final "Press Enter" prompts. Useful for automation.
-.VERSION
-    1.0.0
 #>
 
 param(
     [switch]$NonInteractive
 )
 
-$ScriptVersion = '1.0.0'
+$ScriptVersion = '1.0.1'
 
 $ErrorActionPreference = "Stop"
 $RootDir = Split-Path $PSScriptRoot -Parent
