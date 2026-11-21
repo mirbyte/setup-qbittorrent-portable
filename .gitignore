@@ -8,7 +8,6 @@
 /portable-temp/
 /qbittorrent_*_setup.exe
 /qbittorrent_*_setup.exe.partial
-*.exe
 
 # Generated at runtime
 /updater_events.log
@@ -18,3 +17,4 @@
 # Other
 .cursorignore
 /release
+AGENTS.md
